@@ -37,4 +37,4 @@ This app uses the `flutter_bluetooth_serial` package for Bluetooth communication
 
 ## License
 
-This app is licensed under the MIT License.
+This app is licensed under the GPL-3.0 license.
