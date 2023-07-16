@@ -2,121 +2,390 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:permission_handler/permission_handler.dart';
 
-void main() => runApp(MyApp());
+void main() {
+  runApp(const MyApp());
+}
 
-class MyApp extends StatelessWidget {
+BuildContext? _context;
+
+void snackbar(String text) {
+  ScaffoldMessenger.of(_context!).showSnackBar(SnackBar(content: Text(text)));
+}
+
+class MyApp extends StatefulWidget {
+  const MyApp({Key? key}) : super(key: key);
+
+  @override
+  _MyAppState createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  Brightness _brightness = Brightness.light;
+
+  void _toggleBrightness() {
+    setState(() {
+      _brightness =
+          _brightness == Brightness.light ? Brightness.dark : Brightness.light;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Scoreboard',
+      title: 'Score board control',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        brightness: _brightness,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.deepPurple,
+          brightness: _brightness,
+        ),
+        useMaterial3: true,
       ),
-      home: MyHomePage(title: 'Scoreboard'),
+      darkTheme: ThemeData(
+        brightness: _brightness,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.deepPurple,
+          brightness: _brightness,
+        ),
+        useMaterial3: true,
+      ),
+      themeMode: ThemeMode.system,
+      home: Stack(
+        children: [
+          Scaffold(
+            appBar: AppBar(
+              title: const Text('Control Interface'),
+              actions: [
+                PopupMenuButton<Brightness>(
+                  onSelected: (brightness) {
+                    setState(() {
+                      _brightness = brightness;
+                    });
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: Brightness.light,
+                      child: Text('Light theme'),
+                    ),
+                    const PopupMenuItem(
+                      value: Brightness.dark,
+                      child: Text('Dark theme'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            body: const ControlInterface(),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  MyHomePage({Key? key, required this.title}) : super(key: key);
-
-  final String title;
+class ControlInterface extends StatefulWidget {
+  const ControlInterface({super.key});
 
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  _ControlInterfaceState createState() => _ControlInterfaceState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _ControlInterfaceState extends State<ControlInterface> {
   BluetoothConnection? connection;
-  bool connected = false;
+  bool isConnected = false;
+  List<int> points = [0, 0]; // initialize with two zeros
+  int time = 0;
+  bool isRunning = false;
 
-  int leftPoints = 0;
-  int rightPoints = 0;
-  int gameTimeSeconds = 0;
-  bool timerRunning = false;
+  void connectToDevice() async {
+    BluetoothDevice selectedDevice = await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const DiscoveryPage(),
+      ),
+    );
 
-  void _addLeftPoint() {
-    setState(() {
-      leftPoints++;
-      _sendData("L+$leftPoints");
-    });
-  }
-
-  void _subtractLeftPoint() {
-    setState(() {
-      leftPoints--;
-      if (leftPoints < 0) leftPoints = 0;
-      _sendData("L-$leftPoints");
-    });
-  }
-
-  void _addRightPoint() {
-    setState(() {
-      rightPoints++;
-      _sendData("R+$rightPoints");
-    });
-  }
-
-  void _subtractRightPoint() {
-    setState(() {
-      rightPoints--;
-      if (rightPoints < 0) rightPoints = 0;
-      _sendData("R-$rightPoints");
-    });
-  }
-
-  void _addTime() {
-    setState(() {
-      gameTimeSeconds++;
-      _sendData("T+$gameTimeSeconds");
-    });
-  }
-
-  void _subtractTime() {
-    setState(() {
-      gameTimeSeconds--;
-      if (gameTimeSeconds < 0) gameTimeSeconds = 0;
-      _sendData("T-$gameTimeSeconds");
-    });
-  }
-
-  void _startStopTimer() {
-    setState(() {
-      timerRunning = !timerRunning;
-      _sendData("S${timerRunning ? "1" : "0"}");
-    });
-  }
-
-  void _sendData(String data) async {
-    if (connected && connection != null) {
-      connection!.output.add(ascii.encode(data));
-      await connection!.output.allSent;
-    }
-  }
-
-  void _connectToDevice() async {
-    List<BluetoothDevice> devices = [];
-
-    devices = await FlutterBluetoothSerial.instance.getBondedDevices();
-
-    BluetoothDevice? device;
-
-    for (BluetoothDevice d in devices) {
-      if (d.name == "HC05") {
-        device = d;
-        break;
-      }
-    }
-
-    if (device != null) {
-      BluetoothConnection connection =
-          await BluetoothConnection.toAddress(device.address);
-
+    await BluetoothConnection.toAddress(selectedDevice.address)
+        .then((_connection) {
+      snackbar('Connected to the device');
       setState(() {
-        this.connection = connection;
-        connected = true;
+        connection = _connection;
+        isConnected = true;
       });
+    }).catchError((error) {
+      snackbar('Cannot connect, exception occurred | $error');
+      debugPrint(error);
+    });
+  }
+
+  void check() {
+    if (isConnected == false) {
+      snackbar("Device is not connected!");
+    } else if (isRunning == false) {
+      snackbar("Scoreboard is not running!");
+    }
+  }
+
+  void addPointLeft() {
+    if (isConnected && isRunning) {
+      connection!.output.add(ascii.encode('l+'));
+      setState(() {
+        points[0]++;
+        snackbar("+1 left points");
+      });
+    } else {
+      check();
+    }
+  }
+
+  void subtractPointLeft() {
+    if (isConnected && isRunning) {
+      connection!.output.add(ascii.encode('l-'));
+      setState(() {
+        points[0]--;
+        snackbar("-1 left points");
+      });
+    } else {
+      check();
+    }
+  }
+
+  void addPointRight() {
+    if (isConnected && isRunning) {
+      connection!.output.add(ascii.encode('r+'));
+      setState(() {
+        points[1]++;
+        snackbar("+1 right points");
+      });
+    } else {
+      check();
+    }
+  }
+
+  void subtractPointRight() {
+    if (isConnected && isRunning) {
+      connection!.output.add(ascii.encode('r-'));
+      setState(() {
+        points[1]--;
+        snackbar("-1 right points");
+      });
+    } else {
+      check();
+    }
+  }
+
+  void addTime() {
+    if (isConnected && isRunning) {
+      connection!.output.add(ascii.encode('t+'));
+      setState(() {
+        time++;
+        snackbar("+1 sec");
+      });
+    } else {
+      check();
+    }
+  }
+
+  void subtractTime() {
+    if (isConnected && isRunning) {
+      connection!.output.add(ascii.encode('t-'));
+      setState(() {
+        time--;
+        snackbar("-1 sec");
+      });
+    } else {
+      check();
+    }
+  }
+
+  void startGame() {
+    if (isConnected && isRunning) {
+      connection!.output.add(ascii.encode('s'));
+      setState(() {
+        isRunning = true;
+        snackbar("Stopped the timer");
+      });
+    } else {
+      check();
+    }
+  }
+
+  void stopGame() {
+    if (isConnected && isRunning) {
+      connection!.output.add(ascii.encode('x'));
+      setState(() {
+        isRunning = false;
+        snackbar("Started the timer");
+      });
+    } else {
+      check();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _context = context;
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  isConnected ? 'Connected' : 'Not connected',
+                  style: TextStyle(
+                    color: isConnected ? Colors.green : Colors.grey,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(width: 20),
+                Text(
+                  isRunning ? 'Running' : 'Not running',
+                  style: TextStyle(
+                    color: isRunning ? Colors.green : Colors.grey,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(
+              height: 40,
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                Column(
+                  children: [
+                    const Text(
+                      'Left',
+                      style: TextStyle(fontSize: 24),
+                    ),
+                    Text(
+                      '${points[0]}',
+                      style: const TextStyle(fontSize: 32),
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton(
+                          onPressed: addPointLeft,
+                          child: const Icon(Icons.add),
+                        ),
+                        const SizedBox(width: 16),
+                        ElevatedButton(
+                          onPressed: subtractPointLeft,
+                          child: const Icon(Icons.remove),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                Column(
+                  children: [
+                    const Text(
+                      'Right',
+                      style: TextStyle(fontSize: 24),
+                    ),
+                    Text(
+                      '${points[1]}',
+                      style: const TextStyle(fontSize: 32),
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton(
+                          onPressed: addPointRight,
+                          child: const Icon(Icons.add),
+                        ),
+                        const SizedBox(width: 16),
+                        ElevatedButton(
+                          onPressed: subtractPointRight,
+                          child: const Icon(Icons.remove),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 32),
+            Text(
+              'Time: $time sec',
+              style: const TextStyle(fontSize: 32),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton(
+                  onPressed: startGame,
+                  child: const Text('Start'),
+                ),
+                const SizedBox(width: 16),
+                ElevatedButton(
+                  onPressed: stopGame,
+                  child: const Text('Stop'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: connectToDevice,
+        child: const Icon(Icons.bluetooth),
+      ),
+    );
+  }
+}
+
+class DiscoveryPage extends StatefulWidget {
+  const DiscoveryPage({super.key});
+
+  @override
+  _DiscoveryPageState createState() => _DiscoveryPageState();
+}
+
+class _DiscoveryPageState extends State<DiscoveryPage> {
+  List<BluetoothDiscoveryResult> results = [];
+
+  bool isDiscovering = false;
+
+  void startDiscovery() async {
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetooth,
+      Permission.bluetoothConnect,
+      Permission.location,
+    ].request();
+
+    // Check if the permissions have been granted
+    if (statuses[Permission.bluetoothScan] == PermissionStatus.granted &&
+        statuses[Permission.bluetooth] == PermissionStatus.granted &&
+        statuses[Permission.location] == PermissionStatus.granted) {
+      setState(() {
+        results.clear();
+        isDiscovering = true;
+        snackbar("Search operation begun");
+      });
+
+      FlutterBluetoothSerial.instance.startDiscovery().listen((result) {
+        setState(() {
+          results.add(result);
+        });
+      }, onDone: () {
+        setState(() {
+          isDiscovering = false;
+          snackbar("Search operation completed");
+        });
+      });
+    } else {
+      snackbar("Please enable the permission to search");
     }
   }
 
@@ -124,111 +393,27 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.title),
+        title: const Text('Select a device'),
       ),
-      body: Container(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          mainAxisAlignment: MainAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  children: [
-                    const Text(
-                      "Left",
-                      style: TextStyle(fontSize: 24.0),
-                    ),
-                    Text(
-                      leftPoints.toString(),
-                      style: const TextStyle(fontSize: 48.0),
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          onPressed: _subtractLeftPoint,
-                          icon: const Icon(Icons.remove),
-                        ),
-                        IconButton(
-                          onPressed: _addLeftPoint,
-                          icon: const Icon(Icons.add),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                Column(
-                  children: [
-                    const Text(
-                      "Right",
-                      style: TextStyle(fontSize: 24.0),
-                    ),
-                    Text(
-                      rightPoints.toString(),
-                      style: const TextStyle(fontSize: 48.0),
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          onPressed: _subtractRightPoint,
-                          icon: const Icon(Icons.remove),
-                        ),
-                        IconButton(
-                          onPressed: _addRightPoint,
-                          icon: const Icon(Icons.add),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
+      body: ListView.builder(
+        itemCount: results.length,
+        itemBuilder: (context, index) {
+          BluetoothDiscoveryResult result = results[index];
+          return ListTile(
+            title: Text(result.device.name ?? 'Unknown device'),
+            subtitle: Text(result.device.address),
+            trailing: ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop(result.device);
+              },
+              child: const Text('Connect'),
             ),
-            const SizedBox(height: 32.0),
-            const Text(
-              "Game Time",
-              style: TextStyle(fontSize: 24.0),
-            ),
-            Text(
-              "${gameTimeSeconds ~/ 60}:${(gameTimeSeconds % 60).toString().padLeft(2, '0')}",
-              style: const TextStyle(fontSize: 48.0),
-            ),
-            const SizedBox(height: 16.0),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  onPressed: _subtractTime,
-                  icon: const Icon(Icons.remove),
-                ),
-                const SizedBox(width: 16.0),
-                IconButton(
-                  onPressed: _addTime,
-                  icon: const Icon(Icons.add),
-                ),
-              ],
-            ),
-            const SizedBox(height: 32.0),
-            ElevatedButton(
-              onPressed: _startStopTimer,
-              child: Text(
-                timerRunning ? "Stop Timer" : "Start Timer",
-                style: const TextStyle(fontSize: 24.0),
-              ),
-            ),
-            const SizedBox(height: 32.0),
-            ElevatedButton(
-              onPressed: _connectToDevice,
-              child: Text(
-                connected ? "Connected" : "Connect to Device",
-                style: const TextStyle(fontSize: 24.0),
-              ),
-            ),
-          ],
-        ),
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: startDiscovery,
+        child: const Icon(Icons.search),
       ),
     );
   }
